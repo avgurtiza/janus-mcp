@@ -8,10 +8,10 @@ import Database from "better-sqlite3";
 const DEFAULT_TOP_K = 5;
 const DEFAULT_EXCLUDES = ["node_modules", ".git", "vendor", "*.log"];
 const DEFAULT_INCLUDE = ["app", "routes", "database"];
-const DEFAULT_EMBED_DIM = 1024; // bge-m3 default
-const FAST_MODE_DIM = 128; // Truncated for speed
+const MRL_TIERS = [64, 128, 256, 512, 1024] as const;
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const MODEL = "bge-m3:latest";
+const FULL_DIM = 1024;
 const CHUNK_SIZE = 2000;
 const CHUNK_OVERLAP = 200;
 const PARALLEL_EMBEDDINGS = 4;
@@ -52,11 +52,11 @@ function loadConfig(projectPath: string): Config {
   return { excludePatterns: DEFAULT_EXCLUDES, includeFolders: DEFAULT_INCLUDE, defaultTopK: DEFAULT_TOP_K, fastMode: false, autoFilter: true };
 }
 
-function truncateEmbedding(embedding: number[], targetDim: number): number[] {
+function sliceEmbedding(embedding: number[], targetDim: number): number[] {
   return embedding.slice(0, targetDim);
 }
 
-async function embed(text: string, fastMode: boolean = false): Promise<number[]> {
+async function embed(text: string): Promise<number[]> {
   const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -68,7 +68,7 @@ async function embed(text: string, fastMode: boolean = false): Promise<number[]>
   }
 
   const data = await response.json() as { embedding: number[] };
-  return fastMode ? truncateEmbedding(data.embedding, FAST_MODE_DIM) : data.embedding;
+  return data.embedding;
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
