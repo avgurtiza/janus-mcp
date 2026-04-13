@@ -58,7 +58,7 @@ npx -C /path/to/janus/mcp-server janus stats
 Tell OpenCode:
 
 ```txt
-Fetch and follow instructions from https://raw.githubusercontent.com/tatay/janus/refs/heads/main/.opencode/INSTALL.md
+Fetch and follow instructions from https://raw.githubusercontent.com/avgurtiza/janus-mcp/main/.opencode/INSTALL.md
 ```
 
 Add Janus to your `opencode.json` config:
