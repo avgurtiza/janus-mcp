@@ -387,8 +387,12 @@ async function runCli() {
     const dbPath = path.join(projectPath, ".janus.db");
     const db = new Database(dbPath);
     
-    const queryEmbed = await embed(query, config.fastMode);
-    const entries = db.prepare("SELECT path, embedding FROM vectors").all() as VectorEntry[];
+    const searchDim = config.fastMode ? (config.fastModeDim || 128) : (config.normalModeDim || 1024);
+    const fullQueryEmbed = await embed(query);
+    const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
+    
+    const col = `embedding_${searchDim}`;
+    const entries = db.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
     
     const scored = entries.map((entry) => ({
       path: entry.path,
