@@ -7,13 +7,15 @@ import Database from "better-sqlite3";
 const DEFAULT_TOP_K = 5;
 const DEFAULT_EXCLUDES = ["node_modules", ".git", "vendor", "*.log"];
 const DEFAULT_INCLUDE = ["app", "routes", "database"];
-const DEFAULT_EMBED_DIM = 768; // nomic-embed-text default
+const DEFAULT_EMBED_DIM = 1024; // bge-m3 default
 const FAST_MODE_DIM = 128; // Truncated for speed
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const MODEL = "nomic-embed-text:latest";
+const MODEL = "bge-m3:latest";
 const CHUNK_SIZE = 2000;
 const CHUNK_OVERLAP = 200;
 const PARALLEL_EMBEDDINGS = 4;
+// Meta is now stored in the index DB - loaded during index time
+// No runtime file dependency
 function loadConfig(projectPath) {
     const configPath = path.join(projectPath, ".janus-config.json");
     if (fs.existsSync(configPath)) {
@@ -112,13 +114,28 @@ async function runCli() {
     const command = args[0];
     if (command === "index" || command === "reindex") {
         console.log("Indexing project...");
-        const projectPath = process.cwd();
+        // Auto-detect project path
+        let detectedPath = process.cwd();
+        let checkPath = detectedPath;
+        for (let i = 0; i < 5; i++) {
+            const dbPath = path.join(checkPath, ".janus.db");
+            if (fs.existsSync(dbPath)) {
+                detectedPath = checkPath;
+                break;
+            }
+            const parent = path.dirname(checkPath);
+            if (parent === checkPath)
+                break;
+            checkPath = parent;
+        }
+        const projectPath = detectedPath;
         const config = loadConfig(projectPath);
         const dbPath = path.join(projectPath, ".janus.db");
         const db = new Database(dbPath);
         db.exec(`CREATE TABLE IF NOT EXISTS vectors (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, embedding TEXT NOT NULL, indexed_at TEXT)`);
         const files = await scanWithFd(projectPath).catch(() => scanDirectoryNative(projectPath));
         console.log(`Found ${files.length} files`);
+        // Meta entries now added via 'janus meta add' command - not from file
         let count = 0;
         for (let i = 0; i < files.length; i += PARALLEL_EMBEDDINGS) {
             const batch = files.slice(i, i + PARALLEL_EMBEDDINGS);
@@ -149,7 +166,21 @@ async function runCli() {
         process.exit(0);
     }
     if (command === "stats") {
-        const projectPath = process.cwd();
+        // Auto-detect project path
+        let detectedPath = process.cwd();
+        let checkPath = detectedPath;
+        for (let i = 0; i < 5; i++) {
+            const dbPath = path.join(checkPath, ".janus.db");
+            if (fs.existsSync(dbPath)) {
+                detectedPath = checkPath;
+                break;
+            }
+            const parent = path.dirname(checkPath);
+            if (parent === checkPath)
+                break;
+            checkPath = parent;
+        }
+        const projectPath = detectedPath;
         const dbPath = path.join(projectPath, ".janus.db");
         const db = new Database(dbPath);
         const result = db.prepare("SELECT COUNT(DISTINCT substr(path, 1, instr(path || '::chunk::', '::chunk::'))) as fileCount, COUNT(*) as chunkCount FROM vectors").get();
@@ -157,7 +188,113 @@ async function runCli() {
         db.close();
         process.exit(0);
     }
-    console.log("Usage: janus [index|stats]");
+    if (command === "meta") {
+        const action = args[1];
+        // Auto-detect project path
+        let detectedPath = process.cwd();
+        let checkPath = detectedPath;
+        for (let i = 0; i < 5; i++) {
+            const dbPath = path.join(checkPath, ".janus.db");
+            if (fs.existsSync(dbPath)) {
+                detectedPath = checkPath;
+                break;
+            }
+            const parent = path.dirname(checkPath);
+            if (parent === checkPath)
+                break;
+            checkPath = parent;
+        }
+        const projectPath = detectedPath;
+        const config = loadConfig(projectPath);
+        const dbPath = path.join(projectPath, ".janus.db");
+        const db = new Database(dbPath);
+        if (action === "add") {
+            const metaPath = args[2];
+            const description = args.slice(3).join(' ');
+            if (!metaPath || !description) {
+                console.log("Usage: janus meta add <path> <description>");
+                process.exit(1);
+            }
+            const text = `${metaPath}: ${description}`;
+            const embedding = await embed(text, config.fastMode);
+            db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
+                .run(`meta:${metaPath}::chunk::0`, JSON.stringify(embedding));
+            console.log(`Added meta: ${metaPath}`);
+            db.close();
+            process.exit(0);
+        }
+        if (action === "list") {
+            const entries = db.prepare("SELECT path FROM vectors WHERE path LIKE 'meta:%'").all();
+            entries.forEach(e => console.log(e.path.replace('::chunk::0', '').replace('meta:', '')));
+            db.close();
+            process.exit(0);
+        }
+        if (action === "delete") {
+            const metaPath = args[2];
+            if (!metaPath) {
+                console.log("Usage: janus meta delete <path>");
+                process.exit(1);
+            }
+            db.prepare("DELETE FROM vectors WHERE path = ?").run(`meta:${metaPath}::chunk::0`);
+            console.log(`Deleted meta: ${metaPath}`);
+            db.close();
+            process.exit(0);
+        }
+        console.log("Usage: janus meta [add|list|delete]");
+        db.close();
+        process.exit(1);
+    }
+    if (command === "search") {
+        const query = args.find(a => a.startsWith('--query='))?.split('=')[1] || args[1];
+        const topK = parseInt(args.find(a => a.startsWith('--topK='))?.split('=')[2] || '5');
+        if (!query) {
+            console.log("Usage: janus search --query='your search' --topK=5");
+            process.exit(1);
+        }
+        // Auto-detect project path - walk up looking for .janus.db
+        let detectedPath = process.cwd();
+        let checkPath = detectedPath;
+        for (let i = 0; i < 5; i++) {
+            const dbPath = path.join(checkPath, ".janus.db");
+            if (fs.existsSync(dbPath)) {
+                detectedPath = checkPath;
+                break;
+            }
+            const parent = path.dirname(checkPath);
+            if (parent === checkPath)
+                break;
+            checkPath = parent;
+        }
+        const projectPath = detectedPath;
+        const config = loadConfig(projectPath);
+        const dbPath = path.join(projectPath, ".janus.db");
+        const db = new Database(dbPath);
+        const queryEmbed = await embed(query, config.fastMode);
+        const entries = db.prepare("SELECT path, embedding FROM vectors").all();
+        const scored = entries.map((entry) => ({
+            path: entry.path,
+            score: cosineSimilarity(queryEmbed, JSON.parse(entry.embedding)),
+        }));
+        scored.sort((a, b) => b.score - a.score);
+        // Convert meta: paths to actual file paths in results
+        const fileScores = new Map();
+        for (const s of scored) {
+            let filePath = s.path.split("::chunk::")[0];
+            // Convert meta:path to actual path
+            if (filePath.startsWith("meta:")) {
+                filePath = filePath.substring(5); // Remove "meta:" prefix
+            }
+            const existing = fileScores.get(filePath);
+            if (!existing || s.score > existing.score) {
+                fileScores.set(filePath, { path: s.path, score: s.score });
+            }
+        }
+        const topResults = Array.from(fileScores.values()).slice(0, topK);
+        console.log(JSON.stringify(topResults, null, 2));
+        db.close();
+        process.exit(0);
+    }
+    console.log("Usage: janus [index|stats|search]");
     process.exit(1);
 }
 async function main() {
@@ -189,28 +326,65 @@ async function main() {
             properties: {
                 query: { type: "string", description: "Natural language search query" },
                 topK: { type: "number", description: "Number of results (default 5)" },
+                projectPath: { type: "string", description: "Optional: project path to search (defaults to current directory)" },
             },
             required: ["query"],
         }),
     }, async (args) => {
+        // Auto-detect project if not provided - walk up from cwd looking for .janus.db
+        let detectedPath = projectPath;
+        if (!args.projectPath) {
+            let checkPath = projectPath;
+            for (let i = 0; i < 5; i++) { // Max 5 levels up
+                const dbPath = path.join(checkPath, ".janus.db");
+                if (fs.existsSync(dbPath)) {
+                    detectedPath = checkPath;
+                    break;
+                }
+                const parent = path.dirname(checkPath);
+                if (parent === checkPath)
+                    break; // Reached root
+                checkPath = parent;
+            }
+        }
+        // Allow override of project path from args
+        const searchPath = args.projectPath || detectedPath;
+        const searchConfig = args.projectPath ? loadConfig(searchPath) : (searchPath !== projectPath ? loadConfig(searchPath) : config);
+        const searchDbPath = path.join(searchPath, ".janus.db");
+        // Open a separate DB connection for the target project if different
+        let searchDb = db;
+        let shouldCloseDb = false;
+        if (args.projectPath || searchPath !== projectPath) {
+            searchDb = new Database(searchDbPath);
+            shouldCloseDb = true;
+        }
         const query = args.query;
-        const k = args.topK || config.defaultTopK;
-        const queryEmbed = await embed(query, config.fastMode);
-        const entries = db.prepare("SELECT path, embedding FROM vectors").all();
+        const k = args.topK || searchConfig.defaultTopK;
+        const queryEmbed = await embed(query, searchConfig.fastMode);
+        const entries = searchDb.prepare("SELECT path, embedding FROM vectors").all();
         const scored = entries.map((entry) => ({
             path: entry.path,
             score: cosineSimilarity(queryEmbed, JSON.parse(entry.embedding)),
         }));
         scored.sort((a, b) => b.score - a.score);
+        // Convert meta: paths to actual file paths in results
         const fileScores = new Map();
         for (const s of scored) {
-            const filePath = s.path.split("::chunk::")[0];
+            let filePath = s.path.split("::chunk::")[0];
+            // Convert meta:path to actual path
+            if (filePath.startsWith("meta:")) {
+                filePath = filePath.substring(5);
+            }
             const existing = fileScores.get(filePath);
             if (!existing || s.score > existing.score) {
                 fileScores.set(filePath, { path: s.path, score: s.score });
             }
         }
         const topResults = Array.from(fileScores.values()).slice(0, k);
+        // Close the separate DB connection if we opened one
+        if (shouldCloseDb) {
+            searchDb.close();
+        }
         return {
             content: [{ type: "text", text: JSON.stringify(topResults) }],
         };

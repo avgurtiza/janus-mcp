@@ -25,6 +25,8 @@ When the LLM needs context, Janus narrows the field - not a general search tool,
 - **Configurable**: `.janus-config.json` for folders, patterns, topK
 - **Fast indexing**: ~40s reindex with parallel embeddings
 - **Smart indexing**: Skip unchanged files, chunked for large files
+- **Auto-detect project**: Walks up from cwd to find `.janus.db`
+- **Meta entries**: Add semantic descriptions to files for better search
 
 ## Quickstart
 
@@ -37,7 +39,7 @@ cd mcp-server && npm run build
 
 # Start Ollama
 ollama serve
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
 ### CLI Commands
@@ -53,13 +55,21 @@ Check stats:
 npx -C /path/to/janus/mcp-server janus stats
 ```
 
-## OpenCode Setup
-
-Tell OpenCode:
-
-```txt
-Fetch and follow instructions from https://raw.githubusercontent.com/avgurtiza/janus-mcp/main/.opencode/INSTALL.md
+Search:
+```bash
+npx -C /path/to/janus/mcp-server janus search --query="campsite API" --topK=5
 ```
+
+### Meta Commands
+
+Add descriptions to files for better search:
+```bash
+janus meta add "app/Http/Controllers/CampsiteController.php" "Handles campsite CRUD operations"
+janus meta list
+janus meta delete "app/Http/Controllers/CampsiteController.php"
+```
+
+## OpenCode Setup
 
 Add Janus to your `opencode.json` config:
 
@@ -67,7 +77,7 @@ Add Janus to your `opencode.json` config:
 {
   "mcp": {
     "janus": {
-      "command": ["npx", "janus"],
+      "command": ["npx", "-C", "/path/to/janus/mcp-server", "janus"],
       "enabled": true,
       "type": "local"
     }
@@ -75,18 +85,12 @@ Add Janus to your `opencode.json` config:
 }
 ```
 
-Or install globally:
-
-```bash
-cd mcp-server && npm install -g .
-```
-
 ### Prerequisites
 
 1. **Start Ollama** before using Janus:
 ```bash
 ollama serve
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
 2. **Create `.janus-config.json`** in your project root:
@@ -100,22 +104,20 @@ ollama pull nomic-embed-text
 }
 ```
 
+3. **Index your project:**
+```bash
+cd /path/to/project
+npx -C /path/to/janus/mcp-server janus index
+```
+
 ### Usage
 
-With `autoFilter: true` (default), Janus automatically filters context whenever your AI agent needs project files — no manual steps needed.
-
-For manual use or debugging:
-
+Search via MCP:
 ```bash
-# Index current project (CLI)
-node /path/to/janus/mcp-server/dist/index.js index
-
-# Or MCP tool (for scripts/agents)
-semantic_search(query: "payment logic")
-
-# Get stats
-get_index_stats()
+semantic_search(query: "payment logic", topK: 10)
 ```
+
+The tool auto-detects which project to search based on the current working directory. You can also explicitly specify `projectPath` if needed.
 
 ### AI Agent Setup
 
@@ -127,20 +129,6 @@ Before answering questions about this project, use the 'semantic_search' tool
 to find relevant files first. This improves accuracy and reduces context.
 ```
 
-**Other agents:** Similar - add guidance to use `semantic_search` for context-heavy tasks.
-
-The agent will automatically call Janus when it needs project context.
-
-## Workflow Example
-
-**Scenario:** You're working on a Laravel project and ask the LLM about user authentication.
-
-With `autoFilter: true`, Janus automatically:
-1. Scans your query → triggers `semantic_search("user authentication login")`
-2. Returns top-ranked files → LLM receives only relevant context
-
-No manual tool calls needed — it just works.
-
 ## Configuration
 
 `.janus-config.json` in project root:
@@ -149,22 +137,15 @@ No manual tool calls needed — it just works.
 |--------|---------|-------------|
 | `includeFolders` | `["app", "routes", "database"]` | Folders to index |
 | `excludePatterns` | `["node_modules", ".git", "vendor", "*.log"]` | Patterns to skip |
-| `defaultTopK` | `5` | Number of files to return to LLM (context limit) |
-| `fastMode` | `false` | Use 128-dim embeddings (6x faster search) |
-| `autoFilter` | `true` | Agent auto-calls semantic_search for context tasks |
+| `defaultTopK` | `5` | Number of files to return to LLM |
+| `fastMode` | `false` | Use 128-dim embeddings (faster) |
+| `autoFilter` | `true` | Agent auto-calls semantic_search |
 
-## Benchmark
+## Supported Embedding Models
 
-| Metric | Value |
-|--------|-------|
-| Total tokens (full project) | 668,574 |
-| Tokens (top 5 relevant) | ~2,000 |
-| **Savings** | **99.7%** |
-| Reindex time (189 files) | ~40s |
-| Search time (386 chunks) | ~60ms |
-| Fast mode search time | <1ms |
-
-**Fast Mode** trades ~0.5% accuracy for **60x faster search** on large codebases.
+- **bge-m3** (recommended) - Best semantic understanding, 1024 dims
+- **nomic-embed-text** - Faster, 768 dims
+- **mxbai-embed-large** - Good quality (may have Ollama issues)
 
 ## Architecture
 
@@ -180,14 +161,14 @@ Janus doesn't replace your files - it filters what the LLM sees.
 ## Tech Stack
 
 - MCP Server: Node.js + TypeScript
-- Embeddings: Ollama + nomic-embed-text
+- Embeddings: Ollama + bge-m3 (or nomic-embed-text)
 - Vector Store: SQLite
 - Protocol: stdio JSON
 
 ## Requirements
 
 - **Unix-like (macOS/Linux)**: Uses `fd` for fast file discovery — install via `brew install fd`
-- **Ollama**: `nomic-embed-text` (274MB)
+- **Ollama**: `bge-m3` (recommended) or `nomic-embed-text`
 - **Windows**: Not supported (shell tools required) — PRs welcome!
 
 ## License
