@@ -21,7 +21,8 @@ When the LLM needs context, Janus narrows the field - not a general search tool,
 - **Client-agnostic**: Works with OpenCode, Cursor, Cline, Windsurf - any AI coding agent with MCP support
 - **Local-first**: All processing happens on your machine
 - **Semantic pruning**: Find relevant files even without exact keywords
-- **Fast Mode**: 128-dim embeddings for sub-200ms search on massive codebases
+- **Fast Mode**: Tiered embeddings — fast: 128 dims, accurate: 1024 dims
+- **Matryoshka Embeddings**: Store 5 accuracy tiers (64/128/256/512/1024 dims) — fast search uses 128 dims, accurate uses 1024
 - **Configurable**: `.janus-config.json` for folders, patterns, topK
 - **Fast indexing**: ~40s reindex with parallel embeddings
 - **Smart indexing**: Skip unchanged files, chunked for large files
@@ -36,7 +37,7 @@ cd mcp-server && npm install && npm run build
 
 # Start Ollama (keep running)
 ollama serve
-ollama pull bge-m3
+ollama pull bge-m3:latest
 ```
 
 ### Index Your Project
@@ -76,7 +77,10 @@ Create `.janus-config.json` in your project root:
 | `includeFolders` | `["app", "routes", "database"]` | Folders to index |
 | `excludePatterns` | `["node_modules", ".git", "vendor", "*.log"]` | Patterns to skip |
 | `defaultTopK` | `5` | Number of files to return to LLM |
-| `fastMode` | `false` | Use 128-dim embeddings (faster) |
+| `fastMode` | `false` | Use tiered embeddings — fast: 128 dims, accurate: 1024 dims |
+| `fastModeDim` | `128` | Dimension for fast mode search |
+| `normalModeDim` | `1024` | Dimension for accurate mode search |
+| `embeddingModel` | `"bge-m3:latest"` | Ollama embedding model |
 | `autoFilter` | `true` | Agent auto-calls semantic_search |
 
 ## OpenCode Setup
@@ -130,14 +134,14 @@ Janus doesn't replace your files - it filters what the LLM sees.
 ## Tech Stack
 
 - MCP Server: Node.js + TypeScript
-- Embeddings: Ollama + bge-m3 (or nomic-embed-text)
+- Embeddings: Ollama + bge-m3 (Matryoshka: 5 tier levels)
 - Vector Store: SQLite
 - Protocol: stdio JSON
 
 ## Requirements
 
 - **Unix-like (macOS/Linux)**: Uses `fd` for fast file discovery — install via `brew install fd`
-- **Ollama**: `bge-m3` (recommended) or `nomic-embed-text`
+- **Ollama**: `bge-m3:latest` (MRL-capable embedding model)
 - **Windows**: Not supported (shell tools required) — PRs welcome!
 
 ## License

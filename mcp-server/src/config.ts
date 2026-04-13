@@ -5,12 +5,22 @@ export interface Config {
   excludePatterns: string[];
   includeFolders: string[];
   defaultTopK: number;
+  fastMode: boolean;
+  autoFilter: boolean;
+  embeddingModel: string;
+  fastModeDim: number;
+  normalModeDim: number;
 }
 
 const DEFAULT_CONFIG: Config = {
   excludePatterns: ["node_modules", ".git", "vendor", "*.log"],
   includeFolders: ["app", "routes", "database"],
   defaultTopK: 5,
+  fastMode: false,
+  autoFilter: true,
+  embeddingModel: "bge-m3:latest",
+  fastModeDim: 128,
+  normalModeDim: 1024,
 };
 
 export function loadConfig(projectPath: string): Config {

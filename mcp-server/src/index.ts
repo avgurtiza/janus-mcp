@@ -8,10 +8,10 @@ import Database from "better-sqlite3";
 const DEFAULT_TOP_K = 5;
 const DEFAULT_EXCLUDES = ["node_modules", ".git", "vendor", "*.log"];
 const DEFAULT_INCLUDE = ["app", "routes", "database"];
-const DEFAULT_EMBED_DIM = 1024; // bge-m3 default
-const FAST_MODE_DIM = 128; // Truncated for speed
+const MRL_TIERS = [64, 128, 256, 512, 1024] as const;
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const MODEL = "bge-m3:latest";
+const FULL_DIM = 1024;
 const CHUNK_SIZE = 2000;
 const CHUNK_OVERLAP = 200;
 const PARALLEL_EMBEDDINGS = 4;
@@ -21,7 +21,10 @@ interface Config {
   includeFolders: string[];
   defaultTopK: number;
   fastMode: boolean;
-  autoFilter: boolean; // Agent auto-uses semantic_search for context tasks
+  autoFilter: boolean;
+  embeddingModel: string;
+  fastModeDim: number;
+  normalModeDim: number;
 }
 
 interface VectorEntry {
@@ -43,20 +46,58 @@ function loadConfig(projectPath: string): Config {
         includeFolders: userConfig.includeFolders || DEFAULT_INCLUDE,
         defaultTopK: userConfig.defaultTopK || DEFAULT_TOP_K,
         fastMode: userConfig.fastMode || false,
-        autoFilter: userConfig.autoFilter !== undefined ? userConfig.autoFilter : true, // Default true
+        autoFilter: userConfig.autoFilter !== undefined ? userConfig.autoFilter : true,
+        embeddingModel: userConfig.embeddingModel || "bge-m3:latest",
+        fastModeDim: userConfig.fastModeDim || 128,
+        normalModeDim: userConfig.normalModeDim || 1024,
       };
     } catch {
-      return { excludePatterns: DEFAULT_EXCLUDES, includeFolders: DEFAULT_INCLUDE, defaultTopK: DEFAULT_TOP_K, fastMode: false, autoFilter: true };
+      return { 
+        excludePatterns: DEFAULT_EXCLUDES, 
+        includeFolders: DEFAULT_INCLUDE, 
+        defaultTopK: DEFAULT_TOP_K, 
+        fastMode: false, 
+        autoFilter: true,
+        embeddingModel: "bge-m3:latest",
+        fastModeDim: 128,
+        normalModeDim: 1024,
+      };
     }
   }
-  return { excludePatterns: DEFAULT_EXCLUDES, includeFolders: DEFAULT_INCLUDE, defaultTopK: DEFAULT_TOP_K, fastMode: false, autoFilter: true };
+  return { 
+    excludePatterns: DEFAULT_EXCLUDES, 
+    includeFolders: DEFAULT_INCLUDE, 
+    defaultTopK: DEFAULT_TOP_K, 
+    fastMode: false, 
+    autoFilter: true,
+    embeddingModel: "bge-m3:latest",
+    fastModeDim: 128,
+    normalModeDim: 1024,
+  };
 }
 
-function truncateEmbedding(embedding: number[], targetDim: number): number[] {
+function sliceEmbedding(embedding: number[], targetDim: number): number[] {
   return embedding.slice(0, targetDim);
 }
 
-async function embed(text: string, fastMode: boolean = false): Promise<number[]> {
+function sliceEmbeddingToTiers(embedding: number[]): Record<number, string> {
+  const tiers: Record<number, string> = {};
+  for (const dim of MRL_TIERS) {
+    tiers[dim] = JSON.stringify(sliceEmbedding(embedding, dim));
+  }
+  return tiers;
+}
+
+function insertVector(db: Database.Database, path: string, embedding: number[]) {
+  const tiers = sliceEmbeddingToTiers(embedding);
+  db.prepare(`
+    INSERT OR REPLACE INTO vectors 
+    (path, embedding_64, embedding_128, embedding_256, embedding_512, embedding_1024, indexed_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(path, tiers[64], tiers[128], tiers[256], tiers[512], tiers[1024]);
+}
+
+async function embed(text: string): Promise<number[]> {
   const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -68,7 +109,7 @@ async function embed(text: string, fastMode: boolean = false): Promise<number[]>
   }
 
   const data = await response.json() as { embedding: number[] };
-  return fastMode ? truncateEmbedding(data.embedding, FAST_MODE_DIM) : data.embedding;
+  return data.embedding;
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -132,8 +173,8 @@ function scanDirectoryNative(dirPath: string): string[] {
   return files;
 }
 
-async function embedBatch(texts: string[], fastMode: boolean = false): Promise<number[][]> {
-  const promises = texts.map(text => embed(text, fastMode));
+async function embedBatch(texts: string[]): Promise<number[][]> {
+  const promises = texts.map(text => embed(text));
   return Promise.all(promises);
 }
 
@@ -161,7 +202,41 @@ async function runCli() {
     const dbPath = path.join(projectPath, ".janus.db");
     
     const db = new Database(dbPath);
-    db.exec(`CREATE TABLE IF NOT EXISTS vectors (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, embedding TEXT NOT NULL, indexed_at TEXT)`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vectors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT UNIQUE NOT NULL,
+        embedding_64 TEXT,
+        embedding_128 TEXT,
+        embedding_256 TEXT,
+        embedding_512 TEXT,
+        embedding_1024 TEXT,
+        indexed_at TEXT
+      )
+    `);
+    
+    // Migration: Add tier columns to existing DBs
+    function migrateToMRL(db: Database.Database): void {
+      const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
+      const columnNames = columns.map(c => c.name);
+      
+      if (!columnNames.includes("embedding_1024")) {
+        db.exec(`
+          ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
+        `);
+        
+        const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
+        for (const entry of oldEntries) {
+          insertVector(db, entry.path, JSON.parse(entry.embedding));
+        }
+      }
+    }
+    
+    migrateToMRL(db);
     
     const files = await scanWithFd(projectPath).catch(() => scanDirectoryNative(projectPath));
     console.log(`Found ${files.length} files`);
@@ -185,12 +260,11 @@ async function runCli() {
         }
       }
       
-      const embeddings = await embedBatch(batchChunks.map(c => c.text), config.fastMode);
+      const embeddings = await embedBatch(batchChunks.map(c => c.text));
       
       for (let j = 0; j < batchChunks.length; j++) {
         const { path: chunkPath, index } = batchChunks[j];
-        db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-          .run(`${chunkPath}::chunk::${index}`, JSON.stringify(embeddings[j]));
+        insertVector(db, `${chunkPath}::chunk::${index}`, embeddings[j]);
       }
       
       count += batch.length;
@@ -254,9 +328,8 @@ async function runCli() {
         process.exit(1);
       }
       const text = `${metaPath}: ${description}`;
-      const embedding = await embed(text, config.fastMode);
-      db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-        .run(`meta:${metaPath}::chunk::0`, JSON.stringify(embedding));
+      const embedding = await embed(text);
+      insertVector(db, `meta:${metaPath}::chunk::0`, embedding);
       console.log(`Added meta: ${metaPath}`);
       db.close();
       process.exit(0);
@@ -314,8 +387,12 @@ async function runCli() {
     const dbPath = path.join(projectPath, ".janus.db");
     const db = new Database(dbPath);
     
-    const queryEmbed = await embed(query, config.fastMode);
-    const entries = db.prepare("SELECT path, embedding FROM vectors").all() as VectorEntry[];
+    const searchDim = config.fastMode ? (config.fastModeDim || 128) : (config.normalModeDim || 1024);
+    const fullQueryEmbed = await embed(query);
+    const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
+    
+    const col = `embedding_${searchDim}`;
+    const entries = db.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
     
     const scored = entries.map((entry) => ({
       path: entry.path,
@@ -364,10 +441,37 @@ async function main() {
     CREATE TABLE IF NOT EXISTS vectors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT UNIQUE NOT NULL,
-      embedding TEXT NOT NULL,
+      embedding_64 TEXT,
+      embedding_128 TEXT,
+      embedding_256 TEXT,
+      embedding_512 TEXT,
+      embedding_1024 TEXT,
       indexed_at TEXT
     )
   `);
+
+  // Migration: Add tier columns to existing DBs
+  function migrateToMRL(db: Database.Database): void {
+    const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
+    const columnNames = columns.map(c => c.name);
+    
+    if (!columnNames.includes("embedding_1024")) {
+      db.exec(`
+        ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
+      `);
+      
+      const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
+      for (const entry of oldEntries) {
+        insertVector(db, entry.path, JSON.parse(entry.embedding));
+      }
+    }
+  }
+  
+  migrateToMRL(db);
 
   const server = new McpServer({
     name: "janus",
@@ -418,12 +522,21 @@ async function main() {
         searchDb = new Database(searchDbPath);
         shouldCloseDb = true;
       }
+
+      function getEmbeddingColumn(dim: number): string {
+        return `embedding_${dim}`;
+      }
       
       const query = args.query;
       const k = args.topK || searchConfig.defaultTopK;
-      const queryEmbed = await embed(query, searchConfig.fastMode);
-
-      const entries = searchDb.prepare("SELECT path, embedding FROM vectors").all() as VectorEntry[];
+      const searchDim = searchConfig.fastMode ? (searchConfig.fastModeDim || 128) : (searchConfig.normalModeDim || 1024);
+      
+      // Embed query to full, then slice
+      const fullQueryEmbed = await embed(query);
+      const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
+      
+      const col = getEmbeddingColumn(searchDim);
+      const entries = searchDb.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
       
       const scored = entries.map((entry) => ({
         path: entry.path,
@@ -508,13 +621,12 @@ async function main() {
         }
         
         // Parallel embed
-        const embeddings = await embedBatch(batchChunks.map(c => c.text), localConfig.fastMode);
+        const embeddings = await embedBatch(batchChunks.map(c => c.text));
         
         // Store
         for (let j = 0; j < batchChunks.length; j++) {
           const { path: chunkPath, index } = batchChunks[j];
-          db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-            .run(`${chunkPath}::chunk::${index}`, JSON.stringify(embeddings[j]));
+          insertVector(db, `${chunkPath}::chunk::${index}`, embeddings[j]);
         }
         
         batch.forEach(f => indexedFiles.add(f));
