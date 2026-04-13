@@ -56,6 +56,23 @@ function sliceEmbedding(embedding: number[], targetDim: number): number[] {
   return embedding.slice(0, targetDim);
 }
 
+function sliceEmbeddingToTiers(embedding: number[]): Record<number, string> {
+  const tiers: Record<number, string> = {};
+  for (const dim of MRL_TIERS) {
+    tiers[dim] = JSON.stringify(sliceEmbedding(embedding, dim));
+  }
+  return tiers;
+}
+
+function insertVector(db: Database.Database, path: string, embedding: number[]) {
+  const tiers = sliceEmbeddingToTiers(embedding);
+  db.prepare(`
+    INSERT OR REPLACE INTO vectors 
+    (path, embedding_64, embedding_128, embedding_256, embedding_512, embedding_1024, indexed_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(path, tiers[64], tiers[128], tiers[256], tiers[512], tiers[1024]);
+}
+
 async function embed(text: string): Promise<number[]> {
   const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: "POST",
@@ -132,8 +149,8 @@ function scanDirectoryNative(dirPath: string): string[] {
   return files;
 }
 
-async function embedBatch(texts: string[], fastMode: boolean = false): Promise<number[][]> {
-  const promises = texts.map(text => embed(text, fastMode));
+async function embedBatch(texts: string[]): Promise<number[][]> {
+  const promises = texts.map(text => embed(text));
   return Promise.all(promises);
 }
 
@@ -196,12 +213,11 @@ async function runCli() {
         }
       }
       
-      const embeddings = await embedBatch(batchChunks.map(c => c.text), config.fastMode);
+      const embeddings = await embedBatch(batchChunks.map(c => c.text));
       
       for (let j = 0; j < batchChunks.length; j++) {
         const { path: chunkPath, index } = batchChunks[j];
-        db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-          .run(`${chunkPath}::chunk::${index}`, JSON.stringify(embeddings[j]));
+        insertVector(db, `${chunkPath}::chunk::${index}`, embeddings[j]);
       }
       
       count += batch.length;
@@ -265,9 +281,8 @@ async function runCli() {
         process.exit(1);
       }
       const text = `${metaPath}: ${description}`;
-      const embedding = await embed(text, config.fastMode);
-      db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-        .run(`meta:${metaPath}::chunk::0`, JSON.stringify(embedding));
+      const embedding = await embed(text);
+      insertVector(db, `meta:${metaPath}::chunk::0`, embedding);
       console.log(`Added meta: ${metaPath}`);
       db.close();
       process.exit(0);
@@ -523,13 +538,12 @@ async function main() {
         }
         
         // Parallel embed
-        const embeddings = await embedBatch(batchChunks.map(c => c.text), localConfig.fastMode);
+        const embeddings = await embedBatch(batchChunks.map(c => c.text));
         
         // Store
         for (let j = 0; j < batchChunks.length; j++) {
           const { path: chunkPath, index } = batchChunks[j];
-          db.prepare("INSERT OR REPLACE INTO vectors (path, embedding, indexed_at) VALUES (?, ?, datetime('now'))")
-            .run(`${chunkPath}::chunk::${index}`, JSON.stringify(embeddings[j]));
+          insertVector(db, `${chunkPath}::chunk::${index}`, embeddings[j]);
         }
         
         batch.forEach(f => indexedFiles.add(f));
