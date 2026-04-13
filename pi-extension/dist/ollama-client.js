@@ -4,7 +4,7 @@ export class OllamaClient {
     constructor(baseUrl = "http://localhost:11434") {
         this.baseUrl = baseUrl;
     }
-    async embed(text, model = "embedding-gemma:latest") {
+    async embed(text, model = "embeddinggemma:latest") {
         const response = await fetch(`${this.baseUrl}/api/embeddings`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

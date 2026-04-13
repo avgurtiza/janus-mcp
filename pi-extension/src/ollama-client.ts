@@ -11,7 +11,7 @@ export class OllamaClient {
     this.baseUrl = baseUrl;
   }
 
-  async embed(text: string, model = "embedding-gemma:latest"): Promise<number[]> {
+  async embed(text: string, model = "embeddinggemma:latest"): Promise<number[]> {
     const response = await fetch(`${this.baseUrl}/api/embeddings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
