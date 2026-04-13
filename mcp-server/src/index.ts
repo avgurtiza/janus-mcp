@@ -161,7 +161,18 @@ async function runCli() {
     const dbPath = path.join(projectPath, ".janus.db");
     
     const db = new Database(dbPath);
-    db.exec(`CREATE TABLE IF NOT EXISTS vectors (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, embedding TEXT NOT NULL, indexed_at TEXT)`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vectors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT UNIQUE NOT NULL,
+        embedding_64 TEXT,
+        embedding_128 TEXT,
+        embedding_256 TEXT,
+        embedding_512 TEXT,
+        embedding_1024 TEXT,
+        indexed_at TEXT
+      )
+    `);
     
     const files = await scanWithFd(projectPath).catch(() => scanDirectoryNative(projectPath));
     console.log(`Found ${files.length} files`);
@@ -364,7 +375,11 @@ async function main() {
     CREATE TABLE IF NOT EXISTS vectors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT UNIQUE NOT NULL,
-      embedding TEXT NOT NULL,
+      embedding_64 TEXT,
+      embedding_128 TEXT,
+      embedding_256 TEXT,
+      embedding_512 TEXT,
+      embedding_1024 TEXT,
       indexed_at TEXT
     )
   `);
