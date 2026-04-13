@@ -30,7 +30,7 @@ Fetch and follow instructions from the local file:
 
 5. Start embedding backend before using Janus:
    - `ollama serve`
-   - `ollama pull nomic-embed-text`
+   - `ollama pull bge-m3`
 
 6. In the target project, create `.janus-config.json`:
 

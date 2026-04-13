@@ -144,8 +144,8 @@ to find relevant files first. This improves accuracy and reduces context.
 ## Supported Embedding Models
 
 - **bge-m3** (recommended) - Best semantic understanding, 1024 dims
-- **nomic-embed-text** - Faster, 768 dims
-- **mxbai-embed-large** - Good quality (may have Ollama issues)
+- **nomic-embed-text** - Alternative, 768 dims
+- **mxbai-embed-large** - Good quality but may have Ollama issues
 
 ## Architecture
 
