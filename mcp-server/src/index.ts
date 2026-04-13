@@ -448,12 +448,21 @@ async function main() {
         searchDb = new Database(searchDbPath);
         shouldCloseDb = true;
       }
+
+      function getEmbeddingColumn(dim: number): string {
+        return `embedding_${dim}`;
+      }
       
       const query = args.query;
       const k = args.topK || searchConfig.defaultTopK;
-      const queryEmbed = await embed(query, searchConfig.fastMode);
-
-      const entries = searchDb.prepare("SELECT path, embedding FROM vectors").all() as VectorEntry[];
+      const searchDim = searchConfig.fastMode ? (searchConfig.fastModeDim || 128) : (searchConfig.normalModeDim || 1024);
+      
+      // Embed query to full, then slice
+      const fullQueryEmbed = await embed(query);
+      const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
+      
+      const col = getEmbeddingColumn(searchDim);
+      const entries = searchDb.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
       
       const scored = entries.map((entry) => ({
         path: entry.path,
