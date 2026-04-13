@@ -1,18 +1,18 @@
 # Janus OpenCode Install
 
 Fetch and follow instructions from the local file:
-`/Users/tatay/projects/ai/janus/.opencode/INSTALL.md`
+`https://github.com/avgurtiza/janus-mcp/blob/main/.opencode/INSTALL.md`
 
 ## Steps
 
 1. Ensure dependencies are installed:
-   - `cd /Users/tatay/projects/ai/janus/mcp-server && npm install`
+   - `cd janus-mcp/mcp-server && npm install`
 
 2. Build Janus MCP server:
-   - `cd /Users/tatay/projects/ai/janus/mcp-server && npm run build`
+   - `cd janus-mcp/mcp-server && npm run build`
 
 3. (Optional) Install Janus CLI globally:
-   - `cd /Users/tatay/projects/ai/janus/mcp-server && npm install -g .`
+   - `cd janus-mcp/mcp-server && npm install -g .`
 
 4. Add Janus MCP server to OpenCode config (`opencode.json`):
 
@@ -46,7 +46,7 @@ Fetch and follow instructions from the local file:
 
 7. Index target project:
    - `cd /path/to/project`
-   - `npx -C /Users/tatay/projects/ai/janus/mcp-server janus index`
+   - `npx -C janus-mcp/mcp-server janus index`
 
 8. Verify index:
-   - `npx -C /Users/tatay/projects/ai/janus/mcp-server janus stats`
+   - `npx -C janus-mcp/mcp-server janus stats`
