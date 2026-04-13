@@ -102,10 +102,10 @@ export class VectorStore {
 
     const results = all.map((row) => ({
       path: row.path,
-      distance: this.cosineDistance(query, Array.from(new Float32Array(row.embedding.buffer))),
+      score: this.cosineDistance(query, Array.from(new Float32Array(row.embedding.buffer))),
     }));
 
-    results.sort((a, b) => a.distance - b.distance);
+    results.sort((a, b) => a.score - b.score);
     return results.slice(0, topK);
   }
 
