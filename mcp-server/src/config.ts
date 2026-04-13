@@ -3,16 +3,18 @@ import path from "path";
 
 export interface Config {
   excludePatterns: string[];
+  includeFolders: string[];
   defaultTopK: number;
 }
 
 const DEFAULT_CONFIG: Config = {
   excludePatterns: ["node_modules", ".git", "vendor", "*.log"],
+  includeFolders: ["app", "routes", "database"],
   defaultTopK: 5,
 };
 
 export function loadConfig(projectPath: string): Config {
-  const configPath = path.join(projectPath, ".semantic-gatekeeper.json");
+  const configPath = path.join(projectPath, ".janus-config.json");
   
   if (fs.existsSync(configPath)) {
     try {
