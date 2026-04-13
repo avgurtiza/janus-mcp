@@ -21,7 +21,10 @@ interface Config {
   includeFolders: string[];
   defaultTopK: number;
   fastMode: boolean;
-  autoFilter: boolean; // Agent auto-uses semantic_search for context tasks
+  autoFilter: boolean;
+  embeddingModel: string;
+  fastModeDim: number;
+  normalModeDim: number;
 }
 
 interface VectorEntry {
@@ -43,13 +46,34 @@ function loadConfig(projectPath: string): Config {
         includeFolders: userConfig.includeFolders || DEFAULT_INCLUDE,
         defaultTopK: userConfig.defaultTopK || DEFAULT_TOP_K,
         fastMode: userConfig.fastMode || false,
-        autoFilter: userConfig.autoFilter !== undefined ? userConfig.autoFilter : true, // Default true
+        autoFilter: userConfig.autoFilter !== undefined ? userConfig.autoFilter : true,
+        embeddingModel: userConfig.embeddingModel || "bge-m3:latest",
+        fastModeDim: userConfig.fastModeDim || 128,
+        normalModeDim: userConfig.normalModeDim || 1024,
       };
     } catch {
-      return { excludePatterns: DEFAULT_EXCLUDES, includeFolders: DEFAULT_INCLUDE, defaultTopK: DEFAULT_TOP_K, fastMode: false, autoFilter: true };
+      return { 
+        excludePatterns: DEFAULT_EXCLUDES, 
+        includeFolders: DEFAULT_INCLUDE, 
+        defaultTopK: DEFAULT_TOP_K, 
+        fastMode: false, 
+        autoFilter: true,
+        embeddingModel: "bge-m3:latest",
+        fastModeDim: 128,
+        normalModeDim: 1024,
+      };
     }
   }
-  return { excludePatterns: DEFAULT_EXCLUDES, includeFolders: DEFAULT_INCLUDE, defaultTopK: DEFAULT_TOP_K, fastMode: false, autoFilter: true };
+  return { 
+    excludePatterns: DEFAULT_EXCLUDES, 
+    includeFolders: DEFAULT_INCLUDE, 
+    defaultTopK: DEFAULT_TOP_K, 
+    fastMode: false, 
+    autoFilter: true,
+    embeddingModel: "bge-m3:latest",
+    fastModeDim: 128,
+    normalModeDim: 1024,
+  };
 }
 
 function sliceEmbedding(embedding: number[], targetDim: number): number[] {
@@ -190,6 +214,29 @@ async function runCli() {
         indexed_at TEXT
       )
     `);
+    
+    // Migration: Add tier columns to existing DBs
+    function migrateToMRL(db: Database.Database): void {
+      const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
+      const columnNames = columns.map(c => c.name);
+      
+      if (!columnNames.includes("embedding_1024")) {
+        db.exec(`
+          ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
+          ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
+        `);
+        
+        const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
+        for (const entry of oldEntries) {
+          insertVector(db, entry.path, JSON.parse(entry.embedding));
+        }
+      }
+    }
+    
+    migrateToMRL(db);
     
     const files = await scanWithFd(projectPath).catch(() => scanDirectoryNative(projectPath));
     console.log(`Found ${files.length} files`);
@@ -398,6 +445,29 @@ async function main() {
       indexed_at TEXT
     )
   `);
+
+  // Migration: Add tier columns to existing DBs
+  function migrateToMRL(db: Database.Database): void {
+    const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
+    const columnNames = columns.map(c => c.name);
+    
+    if (!columnNames.includes("embedding_1024")) {
+      db.exec(`
+        ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
+        ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
+      `);
+      
+      const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
+      for (const entry of oldEntries) {
+        insertVector(db, entry.path, JSON.parse(entry.embedding));
+      }
+    }
+  }
+  
+  migrateToMRL(db);
 
   const server = new McpServer({
     name: "janus",
