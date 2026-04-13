@@ -46,8 +46,8 @@ When the LLM needs context, Janus narrows the field. It's not a general search t
 ### 1. Install & Build
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/janus.git
-cd janus/mcp-server
+git clone https://github.com/avgurtiza/janus-mcp.git
+cd janus-mcp/mcp-server
 
 # Install dependencies and build
 npm install
@@ -65,17 +65,17 @@ ollama pull bge-m3:latest
 Navigate to any project you want to index and run Janus from its installation path:
 ```bash
 cd /path/to/your/project
-npx -C /path/to/janus/mcp-server janus index
+npx -C /path/to/janus-mcp/mcp-server janus index
 ```
 
 ### 4. Search & Check Stats
 Test the search and view index statistics directly from the CLI:
 ```bash
 # Search your indexed project
-npx -C /path/to/janus/mcp-server janus search --query="payment logic" --topK=5
+npx -C /path/to/janus-mcp/mcp-server janus search --query="payment logic" --topK=5
 
 # View index stats
-npx -C /path/to/janus/mcp-server janus stats
+npx -C /path/to/janus-mcp/mcp-server janus stats
 ```
 
 ## IDE / Agent Setup
@@ -86,7 +86,7 @@ Add Janus to your MCP configuration file. Here is an example for **OpenCode** (`
 {
   "mcp": {
     "janus": {
-      "command": ["npx", "-C", "/path/to/janus/mcp-server", "janus"],
+      "command": ["npx", "-C", "/path/to/janus-mcp/mcp-server", "janus"],
       "enabled": true,
       "type": "local"
     }
@@ -126,13 +126,13 @@ You can attach manual descriptions to specific files to dramatically improve sea
 
 ```bash
 # Add a description
-npx -C /path/to/janus/mcp-server janus meta add "app/Http/Controllers/CampsiteController.php" "Handles campsite CRUD operations"
+npx -C /path/to/janus-mcp/mcp-server janus meta add "app/Http/Controllers/CampsiteController.php" "Handles campsite CRUD operations"
 
 # List all meta entries
-npx -C /path/to/janus/mcp-server janus meta list
+npx -C /path/to/janus-mcp/mcp-server janus meta list
 
 # Delete a meta entry
-npx -C /path/to/janus/mcp-server janus meta delete "app/Http/Controllers/CampsiteController.php"
+npx -C /path/to/janus-mcp/mcp-server janus meta delete "app/Http/Controllers/CampsiteController.php"
 ```
 
 ## Supported Embedding Models
