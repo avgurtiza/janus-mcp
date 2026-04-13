@@ -5,11 +5,11 @@ A standalone MCP server that uses local embeddings (EmbeddingGemma via Ollama) t
 ## Prerequisites
 
 - Node.js 20+
-- [Ollama](https://github.com/ollama/ollama) installed with `embedding-gemma` model
+- [Ollama](https://github.com/ollama/ollama) installed with `embeddinggemma` model
 
 ```bash
 # Pull the embedding model
-ollama pull embedding-gemma
+ollama pull embeddinggemma
 ```
 
 ## Setup
