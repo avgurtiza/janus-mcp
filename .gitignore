@@ -1,3 +1,4 @@
 .gatekeeper.db
 docs/
 .worktrees/
+.janus.db
