@@ -31,33 +31,31 @@ When the LLM needs context, Janus narrows the field - not a general search tool,
 ## Quickstart
 
 ```bash
-# Install dependencies
-cd mcp-server && npm install
+# Install & build
+cd mcp-server && npm install && npm run build
 
-# Build
-cd mcp-server && npm run build
-
-# Start Ollama
+# Start Ollama (keep running)
 ollama serve
 ollama pull bge-m3
 ```
 
-### CLI Commands
+### Index Your Project
 
-Index your project:
 ```bash
 cd /path/to/project
 npx -C /path/to/janus/mcp-server janus index
 ```
 
-Check stats:
+### Search
+
 ```bash
-npx -C /path/to/janus/mcp-server janus stats
+npx -C /path/to/janus/mcp-server janus search --query="payment logic" --topK=5
 ```
 
-Search:
+### Check Stats
+
 ```bash
-npx -C /path/to/janus/mcp-server janus search --query="campsite API" --topK=5
+npx -C /path/to/janus/mcp-server janus stats
 ```
 
 ### Meta Commands
@@ -68,6 +66,18 @@ janus meta add "app/Http/Controllers/CampsiteController.php" "Handles campsite C
 janus meta list
 janus meta delete "app/Http/Controllers/CampsiteController.php"
 ```
+
+## Configuration
+
+Create `.janus-config.json` in your project root:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `includeFolders` | `["app", "routes", "database"]` | Folders to index |
+| `excludePatterns` | `["node_modules", ".git", "vendor", "*.log"]` | Patterns to skip |
+| `defaultTopK` | `5` | Number of files to return to LLM |
+| `fastMode` | `false` | Use 128-dim embeddings (faster) |
+| `autoFilter` | `true` | Agent auto-calls semantic_search |
 
 ## OpenCode Setup
 
@@ -85,61 +95,20 @@ Add Janus to your `opencode.json` config:
 }
 ```
 
-### Prerequisites
-
-1. **Start Ollama** before using Janus:
-```bash
-ollama serve
-ollama pull bge-m3
-```
-
-2. **Create `.janus-config.json`** in your project root:
-```json
-{
-  "includeFolders": ["app", "routes", "database"],
-  "excludePatterns": ["node_modules", ".git", "vendor", "*.log"],
-  "defaultTopK": 5,
-  "fastMode": false,
-  "autoFilter": true
-}
-```
-
-3. **Index your project:**
-```bash
-cd /path/to/project
-npx -C /path/to/janus/mcp-server janus index
-```
-
-### Usage
-
 Search via MCP:
 ```bash
 semantic_search(query: "payment logic", topK: 10)
 ```
 
-The tool auto-detects which project to search based on the current working directory. You can also explicitly specify `projectPath` if needed.
+The tool auto-detects which project to search based on the current working directory. You can also explicitly specify `projectPath`.
 
-### AI Agent Setup
+### AI Agent Prompt
 
-To have your coding agent automatically use Janus:
-
-**OpenCode:** Add to your system prompt or project instructions:
+To have your coding agent automatically use Janus, add to your system prompt:
 ```
 Before answering questions about this project, use the 'semantic_search' tool 
 to find relevant files first. This improves accuracy and reduces context.
 ```
-
-## Configuration
-
-`.janus-config.json` in project root:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `includeFolders` | `["app", "routes", "database"]` | Folders to index |
-| `excludePatterns` | `["node_modules", ".git", "vendor", "*.log"]` | Patterns to skip |
-| `defaultTopK` | `5` | Number of files to return to LLM |
-| `fastMode` | `false` | Use 128-dim embeddings (faster) |
-| `autoFilter` | `true` | Agent auto-calls semantic_search |
 
 ## Supported Embedding Models
 
