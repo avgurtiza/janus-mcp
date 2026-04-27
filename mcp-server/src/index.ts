@@ -56,11 +56,11 @@ function loadConfig(projectPath: string): Config {
         excludePatterns: DEFAULT_EXCLUDES, 
         includeFolders: DEFAULT_INCLUDE, 
         defaultTopK: DEFAULT_TOP_K, 
-        fastMode: false, 
+        fastMode: false,
         autoFilter: true,
         embeddingModel: "bge-m3:latest",
         fastModeDim: 128,
-        normalModeDim: 1024,
+        normalModeDim: 768,
       };
     }
   }
@@ -113,7 +113,7 @@ async function embed(text: string): Promise<number[]> {
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
-  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+  const dot = a.reduce((sum, val, i) => sum + val * (b[i] || 0), 0);
   const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
   const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
   return magA === 0 || magB === 0 ? 0 : dot / (magA * magB);
@@ -231,7 +231,13 @@ async function runCli() {
         
         const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
         for (const entry of oldEntries) {
-          insertVector(db, entry.path, JSON.parse(entry.embedding));
+          const embedding = JSON.parse(entry.embedding);
+          const tiers = sliceEmbeddingToTiers(embedding);
+          db.prepare(`
+            UPDATE vectors 
+            SET embedding_64 = ?, embedding_128 = ?, embedding_256 = ?, embedding_512 = ?, embedding_1024 = ?
+            WHERE id = ?
+          `).run(tiers[64], tiers[128], tiers[256], tiers[512], tiers[1024], entry.id);
         }
       }
     }
@@ -387,12 +393,14 @@ async function runCli() {
     const dbPath = path.join(projectPath, ".janus.db");
     const db = new Database(dbPath);
     
-    const searchDim = config.fastMode ? (config.fastModeDim || 128) : (config.normalModeDim || 1024);
-    const fullQueryEmbed = await embed(query);
-    const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
-    
-    const col = `embedding_${searchDim}`;
-    const entries = db.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
+      const searchDim = config.fastMode ? (config.fastModeDim || 128) : (config.normalModeDim || 1024);
+      
+      // Embed query to full, then slice to the appropriate dimension
+      const fullQueryEmbed = await embed(query);
+      const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
+      
+      const col = `embedding_${searchDim}`;
+      const entries = db.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
     
     const scored = entries.map((entry) => ({
       path: entry.path,
@@ -450,26 +458,32 @@ async function main() {
     )
   `);
 
-  // Migration: Add tier columns to existing DBs
-  function migrateToMRL(db: Database.Database): void {
-    const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
-    const columnNames = columns.map(c => c.name);
-    
-    if (!columnNames.includes("embedding_1024")) {
-      db.exec(`
-        ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
-        ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
-        ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
-        ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
-        ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
-      `);
-      
-      const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
-      for (const entry of oldEntries) {
-        insertVector(db, entry.path, JSON.parse(entry.embedding));
-      }
-    }
-  }
+   // Migration: Add tier columns to existing DBs
+   function migrateToMRL(db: Database.Database): void {
+     const columns = db.prepare("PRAGMA table_info(vectors)").all() as { name: string }[];
+     const columnNames = columns.map(c => c.name);
+     
+     if (!columnNames.includes("embedding_1024")) {
+       db.exec(`
+         ALTER TABLE vectors ADD COLUMN embedding_64 TEXT;
+         ALTER TABLE vectors ADD COLUMN embedding_128 TEXT;
+         ALTER TABLE vectors ADD COLUMN embedding_256 TEXT;
+         ALTER TABLE vectors ADD COLUMN embedding_512 TEXT;
+         ALTER TABLE vectors ADD COLUMN embedding_1024 TEXT;
+       `);
+       
+       const oldEntries = db.prepare("SELECT id, path, embedding FROM vectors WHERE embedding IS NOT NULL").all() as { id: number; path: string; embedding: string }[];
+       for (const entry of oldEntries) {
+         const embedding = JSON.parse(entry.embedding);
+         const tiers = sliceEmbeddingToTiers(embedding);
+         db.prepare(`
+           UPDATE vectors 
+           SET embedding_64 = ?, embedding_128 = ?, embedding_256 = ?, embedding_512 = ?, embedding_1024 = ?
+           WHERE id = ?
+         `).run(tiers[64], tiers[128], tiers[256], tiers[512], tiers[1024], entry.id);
+       }
+     }
+   }
   
   migrateToMRL(db);
 
@@ -531,11 +545,11 @@ async function main() {
       const k = args.topK || searchConfig.defaultTopK;
       const searchDim = searchConfig.fastMode ? (searchConfig.fastModeDim || 128) : (searchConfig.normalModeDim || 1024);
       
-      // Embed query to full, then slice
+      // Embed query to full, then slice to the appropriate dimension
       const fullQueryEmbed = await embed(query);
       const queryEmbed = sliceEmbedding(fullQueryEmbed, searchDim);
       
-      const col = getEmbeddingColumn(searchDim);
+      const col = `embedding_${searchDim}`;
       const entries = searchDb.prepare(`SELECT path, ${col} as embedding FROM vectors WHERE ${col} IS NOT NULL`).all() as VectorEntry[];
       
       const scored = entries.map((entry) => ({

@@ -2,3 +2,7 @@
 docs/
 .worktrees/
 .janus.db
+
+# Test files
+test_*.js
+update_*.cjs
